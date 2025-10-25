@@ -1,4 +1,4 @@
-S3 Web UI (AWS / Yandex Object Storage)
+# S3 Web UI (AWS / Yandex Object Storage)
 
 Минималистичный веб-интерфейс для просмотра содержимого S3-совместимого хранилища (AWS S3, Yandex Object Storage и др.). Лёгкий одиночный бинарник на Go + один HTML-шаблон. Подходит для self-hosted использования и встраивания во внутренние сервисы.
 
