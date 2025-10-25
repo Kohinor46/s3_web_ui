@@ -1,0 +1,167 @@
+<!-- path: index.gohtml -->
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Index of {{.Name}}</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root { --bg:#0b1020; --panel:#11183a; --text:#e9edf7; --muted:#9aa3b2; --border:#253056; --accent:#4ea1ff; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:linear-gradient(180deg,#0b1020,#0e1530 55%,#0b1020); color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;}
+    .wrap { max-width: 1200px; margin:32px auto; padding:0 16px; }
+    h1 { font-size: 18px; margin:0 0 6px; letter-spacing:.3px; }
+    .crumbs { color:var(--muted); font-size:13px; margin-bottom:12px; }
+    .crumbs code { background:#0b1128; color:#cdd6f4; padding:2px 6px; border:1px solid var(--border); border-radius:6px; }
+
+    .panel { background:var(--panel); border:1px solid var(--border); border-radius:12px; box-shadow:0 6px 22px rgba(0,0,0,.25); overflow:hidden; }
+    .toolbar { display:flex; gap:12px; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--border); background:rgba(255,255,255,.02); }
+    .up { color:var(--accent); text-decoration:none; }
+    .stats { color:var(--muted); font-size:12px; white-space:nowrap; }
+
+    .filter { display:flex; align-items:center; gap:8px; }
+    .filter input {
+      width: 260px; max-width: 50vw; padding:8px 10px; border-radius:8px; border:1px solid var(--border);
+      background:#0b1128; color:var(--text); outline:none;
+    }
+    .filter button {
+      padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:#0b1128; color:var(--muted); cursor:pointer;
+    }
+
+    table { width:100%; border-collapse:collapse; table-layout: fixed; }
+    thead th { text-align:left; font-weight:600; color:#c8d2e6; font-size:12px; letter-spacing:.3px; padding:10px 14px; background:rgba(255,255,255,.02); border-bottom:1px solid var(--border); }
+    tbody td { padding:10px 14px; border-bottom:1px solid var(--border); vertical-align:middle; }
+    tbody tr:hover { background: rgba(78,161,255,.08); }
+
+    thead th:nth-child(1){ width:auto; }
+    thead th:nth-child(2){ width:140px; }
+    thead th:nth-child(3){ width:200px; }
+
+    .name { white-space: nowrap; }
+    .name a { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; color:var(--text); text-decoration:none; }
+    .name a:hover { color:var(--accent); }
+
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .empty { color:var(--muted); padding: 18px 14px; }
+
+    @media (max-width: 720px) {
+      thead th:nth-child(2), thead th:nth-child(3), td:nth-child(2), td:nth-child(3){ display:none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Index of <code>{{.Name}}</code></h1>
+    <div class="crumbs">Path: <code>/{{.Name}}</code></div>
+
+    <section class="panel">
+      <div class="toolbar">
+        <a class="up" href="../">⟵ ../</a>
+        <div class="filter">
+          <input id="filterInput" type="text" placeholder="Фильтр по названию… (EN/RU)" aria-label="Filter by name">
+          <button id="clearBtn" type="button">Очистить</button>
+        </div>
+        <div class="stats">
+          Folders: <span id="statDirs">{{len .Folders}}</span> ·
+          Files: <span id="statFiles">{{len .Files}}</span> ·
+          Showing: <span id="statShown"></span>
+        </div>
+      </div>
+
+      <table id="listing">
+        <thead>
+          <tr><th>Name</th><th>Size</th><th>Last modified</th></tr>
+        </thead>
+        <tbody>
+          {{range .Folders}}
+          <tr class="item dir" data-type="dir" data-name="{{.}}">
+            <td class="name mono" title="{{.}}">
+              <a href="{{.}}">📁 {{.}}</a>
+            </td>
+            <td class="mono">—</td>
+            <td class="mono">—</td>
+          </tr>
+          {{end}}
+
+          {{range .Files}}
+          <tr class="item file" data-type="file" data-name="{{.Name}}">
+            <td class="name mono" title="{{.Name}}">
+              <a href="?{{.Base64}}">📄 {{.Name}}</a>
+            </td>
+            <td class="mono">{{humanize .Size}}</td>
+            <td class="mono">{{time .LastModified}}</td>
+          </tr>
+          {{end}}
+
+          {{if and (eq (len .Folders) 0) (eq (len .Files) 0)}}
+          <tr><td colspan="3" class="empty">No objects found in this prefix.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </section>
+  </div>
+
+  <script>
+    (function(){
+      const $ = (s,root=document)=>root.querySelector(s);
+      const $$ = (s,root=document)=>Array.from(root.querySelectorAll(s));
+
+      // EN -> RU, RU -> EN (йцукен/ qwerty); работаем в lower-case
+      const EN_RU = new Map(Object.entries({
+        "`":"ё","q":"й","w":"ц","e":"у","r":"к","t":"е","y":"н","u":"г","i":"ш","o":"щ","p":"з","[":"х","]":"ъ",
+        "a":"ф","s":"ы","d":"в","f":"а","g":"п","h":"р","j":"о","k":"л","l":"д",";":"ж","'":"э",
+        "z":"я","x":"ч","c":"с","v":"м","b":"и","n":"т","m":"ь",",":"б",".":"ю","/":"."
+      }));
+      const RU_EN = new Map(Array.from(EN_RU.entries()).map(([k,v])=>[v,k]));
+
+      const toLower = (s)=> (s||"").toLocaleLowerCase();
+      const switchLayout = (s, map) => {
+        s = toLower(s);
+        let out = "";
+        for (const ch of s) out += map.get(ch) || ch;
+        return out;
+      };
+
+      const input = $('#filterInput');
+      const clear = $('#clearBtn');
+      const rows  = $$('#listing tbody tr.item');
+      const statShown = $('#statShown');
+
+      // Предрасчет форм имени для быстрого поиска
+      for (const tr of rows) {
+        const name = tr.dataset.name || '';
+        const lower = toLower(name);
+        tr.dataset.nLower = lower;                 // исходное lower
+        tr.dataset.nFromEn = switchLayout(lower, EN_RU); // как если печатали в EN вместо RU
+        tr.dataset.nFromRu = switchLayout(lower, RU_EN); // и наоборот
+      }
+
+      function applyFilter() {
+        const q0 = toLower(input.value);
+        const qFromEn = switchLayout(q0, EN_RU);
+        const qFromRu = switchLayout(q0, RU_EN);
+
+        let shown = 0;
+        for (const tr of rows) {
+          const a = tr.dataset.nLower;
+          const b = tr.dataset.nFromEn;
+          const c = tr.dataset.nFromRu;
+          const ok = !q0
+            || a.includes(q0)
+            || a.includes(qFromEn) || b.includes(q0)   // EN→RU
+            || a.includes(qFromRu) || c.includes(q0);  // RU→EN
+          tr.style.display = ok ? "" : "none";
+          if (ok) shown++;
+        }
+        statShown.textContent = String(shown);
+      }
+
+      input.addEventListener('input', applyFilter);
+      clear.addEventListener('click', () => { input.value=''; input.focus(); applyFilter(); });
+
+      // init
+      applyFilter();
+    })();
+  </script>
+</body>
+</html>
