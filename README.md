@@ -1,5 +1,7 @@
 # S3 Web UI (AWS / Yandex Object Storage)
 
+github: https://github.com/Kohinor46/s3_web_ui/tree/main
+
 Минималистичный веб-интерфейс для просмотра содержимого S3-совместимого хранилища (AWS S3, Yandex Object Storage и др.). Лёгкий одиночный бинарник на Go + один HTML-шаблон. Подходит для self-hosted использования и встраивания во внутренние сервисы.
 
 Demo: список папок и файлов, быстрый фильтр по имени, скачивание файлов.
@@ -64,20 +66,20 @@ docker run --rm -p 8080:8080 \
 	-e s3_addr="" 
 	-e s3_bucket="" 
 	-e s3_pass=""
-  ghcr.io/kohinor46/s3_web_ui:latest
+  kohinor46/s3_web_ui:latest
 
 Docker Compose
 
 services:
   s3-web-ui:
-    image: ghcr.io/<you>/<repo>:latest
+    image: kohinor46/s3_web_ui:latest
     ports:
       - "8080:8080"
     environment:
     	s3_user="" 
-			s3_addr="" 
-			s3_bucket="" 
-			s3_pass=""
+	s3_addr="" 
+	s3_bucket="" 
+	s3_pass=""
 
 
 ⸻
