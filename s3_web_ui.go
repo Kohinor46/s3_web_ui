@@ -9,12 +9,17 @@ import (
 	"net/url"
 	"time"
 	"os"
+	"bytes"
+	"math/rand"
 	"html/template"
 	"encoding/base64"
+	"mime"
+	"path"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"github.com/dustin/go-humanize"
 )
 
@@ -28,6 +33,7 @@ type Config struct{
 }
 
 type Data struct{
+	Mode string
 	Name string
 	Folders[]string
 	Files []File
@@ -42,6 +48,7 @@ type File struct{
 }
 
 var (
+	mode string
 	config Config
 	Svc *s3.S3
 )
@@ -79,12 +86,74 @@ func init() {
 }
 
 func Handler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost{
+		const maxUpload = 2 << 30
+		r.Body = http.MaxBytesReader(w, r.Body, maxUpload)
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			log.Printf("parse form: %w", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		form := r.MultipartForm
+		files := form.File["file"]
+		if len(files) == 0 {
+			log.Printf("no files in form field 'file'")
+			http.Error(w, "", http.StatusInternalServerError)
+			return
+		}
+		prefix := strings.TrimPrefix(r.URL.Path, "/")
+		if prefix != "" && !strings.HasSuffix(prefix, "/") {
+			prefix += "/"
+		}
+		for _, fh := range files {
+			name:=strings.ReplaceAll(fh.Filename, "\\", "_")
+			if name == "" {
+				continue
+			}
+			f, err := fh.Open()
+			if err != nil {
+				log.Printf("open %q: %w", fh.Filename, err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			body, ctype, err := withSniff(f, fh.Header.Get("Content-Type"))
+			if err != nil {
+				f.Close()
+				log.Printf("sniff %q: %w", fh.Filename, err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			name=prefix+name
+			uploads3object(name,ctype,body)
+		}
+    	http.Redirect(w, r, r.URL.Path, http.StatusSeeOther)
+    	return
+	}
+
 
 	if r.URL.RawQuery!=""{
+		if strings.Contains(r.URL.RawQuery,"delete"){
+			s:=strings.Split(r.URL.RawQuery,"!")
+			name,err:=base64.StdEncoding.DecodeString(s[1])
+			if err!=nil{
+				log.Println("Error base64 DecodeString: ",err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+    			return
+			}
+			if err:=deletes3object(string(name),""); err!=nil{
+				log.Println("Error delete ", name,":\n",err)
+			}
+			return
+		}
 		n,err:=url.QueryUnescape(r.URL.RawQuery)
+		if err!=nil{
+			log.Println("Error QueryUnescape:\n",err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+    		return
+		}
 		name,err:=base64.StdEncoding.DecodeString(n)
 		if err!=nil{
-			log.Println("Error QueryUnescape: ",err)
+			log.Println("Error base64 DecodeString: ",err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
     		return
 		}
@@ -113,6 +182,9 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	    "add": func(x,y int) int{
 	    	return x+y
 	    },
+	    "base64": func(s1,s2 string) string{
+	    	return base64.StdEncoding.EncodeToString([]byte(s1+s2))
+	    },
 	}
 	tmpl := template.Must(template.New("index.gohtml").Funcs(funcs).ParseFiles("index.gohtml"))
 	data,err:=gets3objects(r.URL.String(),"")
@@ -126,6 +198,25 @@ func Handler(w http.ResponseWriter, r *http.Request) {
     if err != nil {
     	http.Error(w, err.Error(), http.StatusInternalServerError)
     }
+}
+
+func withSniff(src io.Reader, hinted string) (io.Reader, string, error) {
+	var head [512]byte
+	n, err := io.ReadFull(src, head[:])
+	if err != nil && err != io.ErrUnexpectedEOF {
+		return nil, "", err
+	}
+	buf := head[:n]
+
+	ctype := strings.TrimSpace(hinted)
+	if ctype == "" || ctype == "application/octet-stream" {
+		ctype = http.DetectContentType(buf)
+	}
+	// нормализуем по расширению, если нужно
+	if ex := mime.TypeByExtension(path.Ext("x" /*placeholder*/)); ex != "" && ctype == "" {
+		ctype = ex
+	}
+	return io.MultiReader(bytes.NewReader(buf), src), ctype, nil
 }
 
 func faviconHandler(w http.ResponseWriter, r *http.Request) {
@@ -148,11 +239,51 @@ func main(){
 	}
 
 	Svc = s3.New(sess)
+
+	check_s3()
+
 	http.HandleFunc("/favicon.ico", faviconHandler)
 	http.HandleFunc("/", Handler)
 	if err := http.ListenAndServe(":8080", nil); err!=nil{
 		log.Fatalf("Server failed to start: %v\n", err)
 	} 
+}
+
+func check_s3(){
+	_, err := Svc.ListObjectsV2(&s3.ListObjectsV2Input{
+		Bucket:    aws.String(config.S3.Bucket),
+		Delimiter: aws.String("/"),
+	})
+	if err==nil{
+		mode="list"
+		charset := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    	seed := rand.NewSource(time.Now().UnixNano())
+    	random := rand.New(seed)
+	
+    	result := make([]byte, 10)
+    	for i := range result {
+    	    result[i] = charset[random.Intn(len(charset))]
+    	}
+		_, err := Svc.PutObject(&s3.PutObjectInput{
+			Bucket:      aws.String(config.S3.Bucket),
+			Key:         aws.String(string(result)),
+			Body:        bytes.NewReader(result),
+			ContentType: aws.String("text/plain"),
+			//Metadata:    map[string]*string{"purpose": aws.String("permcheck")},
+		})
+		if err==nil{
+			mode="put"
+			_, err = Svc.DeleteObject(&s3.DeleteObjectInput{
+				Bucket: aws.String(config.S3.Bucket),
+				Key:    aws.String(string(result)),
+			})
+			if err==nil{
+				mode="delete"
+			}
+		}
+	}else{
+		log.Fatalf("Can't list objects, grand permissions")
+	}
 }
 
 func gets3object(name string) (s3.GetObjectOutput,error){
@@ -168,8 +299,55 @@ func gets3object(name string) (s3.GetObjectOutput,error){
 	return *out, nil
 }
 
+func deletes3object(name,token string)error{
+	if !strings.Contains(name,"/"){
+		_, err := Svc.DeleteObject(&s3.DeleteObjectInput{
+			Bucket: aws.String(config.S3.Bucket),
+			Key:    aws.String(name),
+		})
+		if err!=nil{
+			return err
+		}
+		return nil
+	}
+	out, err := Svc.ListObjectsV2(&s3.ListObjectsV2Input{
+		Bucket:    aws.String(config.S3.Bucket),
+		Prefix:    aws.String(name),
+	})
+	if err!=nil{
+		log.Println("Error ListObjectsV2: ",err)
+		return err
+	}
+	for _, content := range out.Contents {
+		_, err = Svc.DeleteObject(&s3.DeleteObjectInput{
+			Bucket: aws.String(config.S3.Bucket),
+			Key:    content.Key,
+		})
+		if err!=nil{
+			return err
+		}
+	}
+	return nil
+}
+
+func uploads3object(name,ctype string,body io.Reader) error {
+	u := s3manager.NewUploaderWithClient(Svc)
+	_, err := u.Upload(&s3manager.UploadInput{
+		Bucket:      aws.String(config.S3.Bucket),
+		Key:         aws.String(name),
+		Body:        body,
+		ContentType: aws.String(ctype),
+	})
+	if err != nil {
+		log.Printf("s3 upload: %w", err)
+		return err
+	}
+	return nil
+}
+
 func gets3objects(prefix,token string) (Data,error){
 	var d Data
+	d.Mode=mode
 	list := &s3.ListObjectsV2Input{
 		Bucket:    aws.String(config.S3.Bucket),
 		Delimiter: aws.String("/"),

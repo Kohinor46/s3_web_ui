@@ -6,7 +6,7 @@
   <title>Index of {{.Name}}</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
-    :root { --bg:#0b1020; --panel:#11183a; --text:#e9edf7; --muted:#9aa3b2; --border:#253056; --accent:#4ea1ff; }
+    :root { --bg:#0b1020; --panel:#11183a; --text:#e9edf7; --muted:#9aa3b2; --border:#253056; --accent:#4ea1ff; --danger:#ff6b6b; }
     * { box-sizing: border-box; }
     body { margin:0; background:linear-gradient(180deg,#0b1020,#0e1530 55%,#0b1020); color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;}
     .wrap { max-width: 1200px; margin:32px auto; padding:0 16px; }
@@ -38,14 +38,36 @@
     thead th:nth-child(3){ width:200px; }
 
     .name { white-space: nowrap; }
-    .name a { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; color:var(--text); text-decoration:none; }
-    .name a:hover { color:var(--accent); }
+    .rowline { display:flex; align-items:center; gap:8px; }
+    .rowline .entry { flex:1 1 auto; min-width:0; }
+    .name a.entry { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; color:var(--text); text-decoration:none; }
+    .name a.entry:hover { color:var(--accent); }
+
+    .btn { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:8px; border:1px solid var(--border); cursor:pointer; text-decoration:none; white-space:nowrap; }
+    .btn:disabled { opacity:.6; cursor:not-allowed; }
+    .btn-del { color:#ffecec; background: rgba(255,107,107,.12); border-color: rgba(255,107,107,.35); }
+    .btn-del:hover { background: rgba(255,107,107,.22); }
+    .btn-del[aria-busy="true"]{ position:relative; }
+    .btn-del[aria-busy="true"]::after{ content:""; width:12px; height:12px; border:2px solid rgba(255,255,255,.7); border-top-color:transparent; border-radius:50%; display:inline-block; animation:spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg) } }
+
+    .btn-primary { color:#0b1020; background: #7ec8ff; border-color:#7ec8ff; }
+    .btn-primary:hover { filter:brightness(0.95); }
 
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
     .empty { color:var(--muted); padding: 18px 14px; }
 
+    .upload { margin-top:16px; }
+    .upload .body { display:flex; gap:10px; flex-wrap:wrap; padding:12px 14px; }
+    .upload input[type="file"] { color:var(--text); }
+    .upload input[type="text"] {
+      padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:#0b1128; color:var(--text);
+    }
+    .muted { color:var(--muted); font-size:12px; }
+
     @media (max-width: 720px) {
       thead th:nth-child(2), thead th:nth-child(3), td:nth-child(2), td:nth-child(3){ display:none; }
+      .filter input { max-width: 60vw; }
     }
   </style>
 </head>
@@ -68,6 +90,8 @@
         </div>
       </div>
 
+      {{ $mode:=.Mode }}
+      {{ $name:=.Name }}
       <table id="listing">
         <thead>
           <tr><th>Name</th><th>Size</th><th>Last modified</th></tr>
@@ -76,7 +100,10 @@
           {{range .Folders}}
           <tr class="item dir" data-type="dir" data-name="{{.}}">
             <td class="name mono" title="{{.}}">
-              <a href="{{.}}">📁 {{.}}</a>
+              <div class="rowline">
+                <a class="entry" href="{{.}}">📁 {{.}}</a>
+                {{ if eq $mode "delete" }}<button type="button" class="btn btn-del" data-del="?delete!{{ base64 $name . }}" data-item="{{.}}">Delete</button>{{end}}
+              </div>
             </td>
             <td class="mono">—</td>
             <td class="mono">—</td>
@@ -86,7 +113,10 @@
           {{range .Files}}
           <tr class="item file" data-type="file" data-name="{{.Name}}">
             <td class="name mono" title="{{.Name}}">
-              <a href="?{{.Base64}}">📄 {{.Name}}</a>
+              <div class="rowline">
+                <a class="entry" href="?{{.Base64}}">📄 {{.Name}}</a>
+                {{ if eq $mode "delete" }}<button type="button" class="btn btn-del" data-del="?delete!{{.Base64}}" data-item="{{.Name}}">Delete</button>{{end}}
+              </div>
             </td>
             <td class="mono">{{humanize .Size}}</td>
             <td class="mono">{{time .LastModified}}</td>
@@ -99,57 +129,57 @@
         </tbody>
       </table>
     </section>
+    {{if or (eq $mode "put") (eq $mode "delete")}}
+    <!-- Upload panel -->
+    <section class="panel upload">
+      <div class="toolbar"><strong>Upload</strong><span class="muted">Загрузка файла в текущую директорию</span></div>
+      <div class="body">
+        <form id="uploadForm" method="post" enctype="multipart/form-data" action="">
+          <input type="file" name="file" multiple required>
+          <button type="submit" class="btn btn-primary">Загрузить</button>
+        </form>
+      </div>
+    </section>
   </div>
+  {{end}}
 
   <script>
     (function(){
       const $ = (s,root=document)=>root.querySelector(s);
       const $$ = (s,root=document)=>Array.from(root.querySelectorAll(s));
 
-      // EN -> RU, RU -> EN (йцукен/ qwerty); работаем в lower-case
+      // EN<->RU раскладка
       const EN_RU = new Map(Object.entries({
         "`":"ё","q":"й","w":"ц","e":"у","r":"к","t":"е","y":"н","u":"г","i":"ш","o":"щ","p":"з","[":"х","]":"ъ",
         "a":"ф","s":"ы","d":"в","f":"а","g":"п","h":"р","j":"о","k":"л","l":"д",";":"ж","'":"э",
         "z":"я","x":"ч","c":"с","v":"м","b":"и","n":"т","m":"ь",",":"б",".":"ю","/":"."
       }));
       const RU_EN = new Map(Array.from(EN_RU.entries()).map(([k,v])=>[v,k]));
-
       const toLower = (s)=> (s||"").toLocaleLowerCase();
-      const switchLayout = (s, map) => {
-        s = toLower(s);
-        let out = "";
-        for (const ch of s) out += map.get(ch) || ch;
-        return out;
-      };
+      const switchLayout = (s, map) => { s = toLower(s); let out = ""; for (const ch of s) out += map.get(ch) || ch; return out; };
 
       const input = $('#filterInput');
       const clear = $('#clearBtn');
       const rows  = $$('#listing tbody tr.item');
       const statShown = $('#statShown');
 
-      // Предрасчет форм имени для быстрого поиска
+      // предрасчет для фильтра
       for (const tr of rows) {
         const name = tr.dataset.name || '';
         const lower = toLower(name);
-        tr.dataset.nLower = lower;                 // исходное lower
-        tr.dataset.nFromEn = switchLayout(lower, EN_RU); // как если печатали в EN вместо RU
-        tr.dataset.nFromRu = switchLayout(lower, RU_EN); // и наоборот
+        tr.dataset.nLower = lower;
+        tr.dataset.nFromEn = switchLayout(lower, EN_RU);
+        tr.dataset.nFromRu = switchLayout(lower, RU_EN);
       }
 
       function applyFilter() {
         const q0 = toLower(input.value);
         const qFromEn = switchLayout(q0, EN_RU);
         const qFromRu = switchLayout(q0, RU_EN);
-
         let shown = 0;
         for (const tr of rows) {
-          const a = tr.dataset.nLower;
-          const b = tr.dataset.nFromEn;
-          const c = tr.dataset.nFromRu;
-          const ok = !q0
-            || a.includes(q0)
-            || a.includes(qFromEn) || b.includes(q0)   // EN→RU
-            || a.includes(qFromRu) || c.includes(q0);  // RU→EN
+          const a = tr.dataset.nLower, b = tr.dataset.nFromEn, c = tr.dataset.nFromRu;
+          const ok = !q0 || a.includes(q0) || a.includes(qFromEn) || b.includes(q0) || a.includes(qFromRu) || c.includes(q0);
           tr.style.display = ok ? "" : "none";
           if (ok) shown++;
         }
@@ -158,6 +188,41 @@
 
       input.addEventListener('input', applyFilter);
       clear.addEventListener('click', () => { input.value=''; input.focus(); applyFilter(); });
+
+      // === DELETE/POST + reload ===
+      function enableBusy(btn, on){
+        if (on) { btn.disabled = true; btn.setAttribute('aria-busy','true'); }
+        else    { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+      }
+      async function tryDelete(url){
+        // 1) DELETE
+        try {
+          const r = await fetch(url, { method: 'DELETE', credentials: 'same-origin', redirect: 'follow' });
+          if (r.ok || (r.status >= 200 && r.status < 400)) return true;
+          // 2) POST fallback for backends without DELETE
+          if ([405,404,400].includes(r.status)) {
+            const p = await fetch(url, { method: 'POST', credentials: 'same-origin', redirect: 'follow' });
+            if (p.ok || (p.status >= 200 && p.status < 400)) return true;
+          }
+        } catch (_) {}
+        return false;
+      }
+      for (const btn of $$('.btn-del')) {
+        btn.addEventListener('click', async (e) => {
+          e.preventDefault(); e.stopPropagation();
+          const name = btn.getAttribute('data-item') || 'item';
+          const url  = btn.getAttribute('data-del');
+          if (!url) return;
+          if (!confirm(`Удалить “${name}”? Это действие необратимо.`)) return;
+          enableBusy(btn, true);
+          const ok = await tryDelete(url);
+          if (ok) location.reload(); else location.href = url; // final fallback
+        });
+      }
+
+      // upload -> постим на текущий путь
+      const form = document.getElementById('uploadForm');
+      if (form) form.action = location.pathname;
 
       // init
       applyFilter();
