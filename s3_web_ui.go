@@ -15,6 +15,7 @@ import (
 	"encoding/base64"
 	"mime"
 	"path"
+	"strconv"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -29,6 +30,14 @@ type Config struct{
 		Passw string
 		Addr string
 		Bucket string
+		ForcePathStyle bool
+		Region string
+	}
+	Proxy struct {
+		Scheme string
+		User string
+		Passw string
+		Addr string
 	}
 }
 
@@ -58,6 +67,12 @@ func init() {
 	flag.StringVar(&config.S3.Addr, "s3_addr", "", "s3_addr")
 	flag.StringVar(&config.S3.Bucket, "s3_bucket", "", "s3_config_bucket")
 	flag.StringVar(&config.S3.Passw, "s3_passw", "", "s3_passw")
+	flag.BoolVar(&config.S3.ForcePathStyle, "s3_force_path_style", false, "s3_force_path_style")
+	flag.StringVar(&config.S3.Region, "s3_region", "", "s3_region")
+	flag.StringVar(&config.Proxy.Scheme, "proxy_scheme", "", "proxy_scheme")
+	flag.StringVar(&config.Proxy.User, "proxy_user", "", "proxy_user")
+	flag.StringVar(&config.Proxy.Passw, "proxy_passw", "", "proxy_passw")
+	flag.StringVar(&config.Proxy.Addr, "proxy_addr", "", "proxy_addr")
 	
 	if config.S3.User==""{
 		config.S3.User=os.Getenv("s3_user")
@@ -82,6 +97,28 @@ func init() {
 		if config.S3.Passw==""{
 			log.Fatalf("s3_passw Required")
 		}
+	}
+	if config.S3.Region==""{
+		config.S3.Region=os.Getenv("s3_region")
+		if config.S3.Region==""{
+			config.S3.Region="ru-central1"
+		}
+	}	
+	if !config.S3.ForcePathStyle{
+		b:=os.Getenv("s3_force_path_style")
+		config.S3.ForcePathStyle,_=strconv.ParseBool(b)
+	}
+	if config.Proxy.Scheme==""{
+		config.Proxy.Scheme=os.Getenv("proxy_scheme")
+	}
+	if config.Proxy.User==""{
+		config.Proxy.User=os.Getenv("proxy_user")
+	}
+	if config.Proxy.Passw==""{
+		config.Proxy.Passw=os.Getenv("proxy_passw")
+	}
+	if config.Proxy.Addr==""{
+		config.Proxy.Addr=os.Getenv("proxy_addr")
 	}
 }
 
@@ -227,13 +264,32 @@ func faviconHandler(w http.ResponseWriter, r *http.Request) {
 
 func main(){
 	creds := credentials.NewStaticCredentials(config.S3.User, config.S3.Passw, "")
-	sess, err := session.NewSession(&aws.Config{
+	s3config:=aws.Config{
 		Credentials:      creds,
-		Region:           aws.String("ru-central1"),
-		S3ForcePathStyle: aws.Bool(true),
+		Region:           aws.String(config.S3.Region),
 		Endpoint:         aws.String(config.S3.Addr),
 		LogLevel:         aws.LogLevel(aws.LogOff),
-	})
+	}
+	if config.S3.ForcePathStyle{
+		s3config.S3ForcePathStyle=aws.Bool(true)
+	}
+	if config.Proxy.Scheme!=""&&config.Proxy.Addr!=""{
+		tr:= &http.Transport{
+			Proxy: http.ProxyURL(&url.URL{
+				Scheme: config.Proxy.Scheme,
+				User:   url.UserPassword(config.Proxy.User, config.Proxy.Passw),
+				Host:   config.Proxy.Addr,
+			}),
+		}
+
+		httpClient:=http.Client{
+			Transport: tr,
+		}
+		s3config.HTTPClient=&httpClient
+	}
+	
+	
+	sess, err := session.NewSession(&s3config)
 	if err != nil {
 		log.Fatalf("NewSession error: %s\n", err)
 	}
