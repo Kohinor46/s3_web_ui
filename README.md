@@ -27,11 +27,20 @@ Demo: список папок и файлов, быстрый фильтр по 
 
 Поддерживаются переменные окружения (удобно для Docker) и/или флаги. Ниже - рекомендуемые имена и значения:
 
-Параметр	Env	Флаг	Описание
-Endpoint	s3_addr	-endpoint	Базовый S3-эндпоинт. AWS: https://s3.amazonaws.com, Yandex: https://storage.yandexcloud.net
-Access Key	s3_user	—	Ключ доступа
-Secret Key	s3_pass	—	Секрет
-Bucket	s3_bucket	-bucket	Имя бакета
+
+Параметр	        Env/Флаг	        Описание
+Endpoint	        s3_addr	            Базовый S3-эндпоинт. AWS: https://s3.amazonaws.com, Yandex: https://storage.yandexcloud.net
+Access Key	        s3_user	            Ключ доступа
+Secret Key	        s3_passw            Секрет
+Bucket	            s3_bucket	        Имя бакета
+UsePathStyle        s3_force_path_style Использовать ли path style
+Region              s3_region           Регион s3
+Прокси схема        proxy_scheme        Схема подключения к прокси (http/https)
+Пользователь прокси proxy_user          Пользователь для подключения к прокси
+Пароль от прокси    proxy_passw         Пароль пользователя для подключения к прокси
+Адрес прокси        proxy_addr          Адрес прокси сервера
+
+
 
 ⸻
 
